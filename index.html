@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0c0e13">
+  <meta name="description" content="Estudio de tarjetas con resorte y un haz de luz.">
+  <title>Elastic Lab</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    (function () {
+      var light = window.matchMedia("(prefers-color-scheme: light)").matches;
+      var root = document.documentElement;
+      root.dataset.theme = light ? "light" : "dark";
+      root.dataset.material = "glass";
+      root.dataset.beam = "css";
+      root.classList.add("js");
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", light ? "#f6f1e8" : "#0c0e13");
+    })();
+  </script>
+</head>
+<body>
+  <main class="stage">
+    <header class="intro">
+      <p class="eyebrow">Estudio</p>
+      <h1>Tarjetas que se asientan</h1>
+    </header>
+
+    <div class="stack-wrap">
+      <section class="stack" id="stack" aria-roledescription="carrusel" aria-label="Notas">
+        <div class="beam-mount" id="beam-mount" hidden>
+          <canvas id="beam" width="2" height="2" aria-hidden="true"></canvas>
+          <div class="beam-css" id="beam-css" aria-hidden="true"></div>
+        </div>
+
+        <article class="card" data-beam="0.97,0.70,0.28" data-glow="#E8A338" style="--solid:#E8A338;--solid-ink:#1C1406;--accent-dark:#F2C56A;--accent-light:#8A5A10;--beam-css:#F7B852">
+          <p class="kicker">Nota 01</p>
+          <h2>Peso</h2>
+          <p class="body">La de adelante lleva el foco. Las otras se quedan atrás, más chicas y más quietas.</p>
+        </article>
+
+        <article class="card" data-beam="1.00,0.46,0.38" data-glow="#F07A6A" style="--solid:#F07A6A;--solid-ink:#24140F;--accent-dark:#FFB0A6;--accent-light:#A33B32;--beam-css:#FF7A6C">
+          <p class="kicker">Nota 02</p>
+          <h2>Rebote</h2>
+          <p class="body">Al soltar no se frena en seco. Llega, se pasa un poco y recién ahí se asienta.</p>
+        </article>
+
+        <article class="card" data-beam="0.58,0.46,1.00" data-glow="#7A68F0" style="--solid:#5B4AD6;--solid-ink:#F7F4FF;--accent-dark:#C9BFFF;--accent-light:#3E3494;--beam-css:#9480FF">
+          <p class="kicker">Nota 03</p>
+          <h2>Haz</h2>
+          <p class="body">La luz sale del borde de abajo y se estira con el movimiento. Cada tarjeta tiene su color.</p>
+        </article>
+
+        <article class="card" data-beam="0.18,0.84,0.78" data-glow="#14A89C" style="--solid:#0C6B64;--solid-ink:#F3FFFD;--accent-dark:#7EE0D6;--accent-light:#0C6E68;--beam-css:#2ED4C6">
+          <p class="kicker">Nota 04</p>
+          <h2>Material</h2>
+          <p class="body">El vidrio deja ver el fondo. El sólido tapa todo y se queda solo con el color.</p>
+        </article>
+      </section>
+      <p class="hint">Desliza, usa la rueda o las flechas.</p>
+    </div>
+
+    <div class="nav-row">
+      <button type="button" id="prev" aria-controls="stack">Anterior</button>
+      <button type="button" id="next" aria-controls="stack">Siguiente</button>
+    </div>
+
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Tema">
+        <button type="button" data-set-theme="light">Claro</button>
+        <button type="button" data-set-theme="dark">Oscuro</button>
+      </div>
+      <div class="seg" role="group" aria-label="Material">
+        <button type="button" data-set-material="glass">Vidrio</button>
+        <button type="button" data-set-material="solid">Sólido</button>
+      </div>
+    </div>
+
+    <p class="sr" id="live" aria-live="polite"></p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
