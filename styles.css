@@ -72,6 +72,16 @@ body {
   top: 0;
   color: rgba(210, 210, 220, 0.72);
   will-change: transform;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.card-dom.is-active {
+  /* Shader owns the silhouette — no DOM bottom edge / corners */
+  background: transparent;
+  border: 0;
+  box-shadow: none;
 }
 
 html[data-theme="light"] .card-dom {

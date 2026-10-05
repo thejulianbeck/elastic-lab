@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "elastic-lab-v2-phone-floor-20261005j";
+  var BUILD = "elastic-lab-v2-smin-fillet-20261005s";
 
   var CARDS = [
     {
@@ -187,17 +187,22 @@
     return layout;
   }
 
-  // Ref @720: active card bottom ≈ y=560 → 22% of H above floor.
-  var ACTIVE_BOTTOM_FRAC = 0.90; // matches ref (~y653/720); ~10% H for bell neck
-
-  function activeCardCenterY(h, cardH) {
-    var cardBottom = h * ACTIVE_BOTTOM_FRAC;
-    return cardBottom - cardH * 0.5;
+  function activeCardCenterY(h, cardH, gap, w) {
+    // Phone: previous card top ~150px under the hint.
+    // Desktop: match hi_a (previous slightly clipped, activeCY ≈ 0.688*H).
+    var prevTop;
+    if (w <= 480 || h / Math.max(w, 1) > 1.55) {
+      prevTop = 150;
+    } else {
+      prevTop = -cardH * 0.08;
+    }
+    var activeTop = prevTop + cardH + gap;
+    return activeTop + cardH * 0.5;
   }
 
   function cardCenterY(index, scrollPos) {
     var L = layout;
-    var activeCenter = activeCardCenterY(L.h, L.cardH);
+    var activeCenter = activeCardCenterY(L.h, L.cardH, L.gap, L.w);
     var stride = L.cardH + L.gap;
     return activeCenter + (index - scrollPos) * stride;
   }
@@ -205,6 +210,7 @@
   function updateDomCards() {
     var L = layout;
     var nodes = cardsDom.children;
+    var activeApprox = Math.round(scroll);
     for (var i = 0; i < N; i++) {
       var el = nodes[i];
       var cy = cardCenterY(i, scroll);
@@ -216,14 +222,28 @@
       el.style.borderRadius = L.radius + "px";
 
       var dist = Math.abs(i - scroll);
+      var isActive = dist < 0.55;
       var below = i > scroll + 0.55;
       var visible = !below && dist < 2.2;
       el.style.opacity = visible ? "1" : "0";
       el.style.visibility = visible ? "visible" : "hidden";
+      el.classList.toggle("is-active", isActive);
+      // Active: no box chrome — mask away bottom so DOM never shows bottom corners
+      if (isActive) {
+        el.style.webkitMaskImage =
+          "linear-gradient(to bottom, #000 0%, #000 42%, rgba(0,0,0,0.55) 58%, transparent 78%)";
+        el.style.maskImage =
+          "linear-gradient(to bottom, #000 0%, #000 42%, rgba(0,0,0,0.55) 58%, transparent 78%)";
+        el.style.borderRadius = L.radius + "px " + L.radius + "px 0 0";
+      } else {
+        el.style.webkitMaskImage = "";
+        el.style.maskImage = "";
+        el.style.borderRadius = L.radius + "px";
+      }
 
       var veil = el.querySelector(".veil");
-      var merge = Math.max(0, 1 - Math.abs(i - scroll));
-      veil.style.opacity = String(Math.pow(merge, 1.2) * 0.95);
+      var merge = Math.max(0, 1 - dist);
+      veil.style.opacity = String(Math.pow(merge, 1.15) * 0.98);
     }
   }
 
@@ -241,7 +261,11 @@
     "uniform float uRad;",
     "uniform float uTheme;", // 0 dark 1 light
     "uniform float uMaterial;", // 0 glass 1 metal
-    "uniform float uActiveCY;", // active card center Y (device px, top-down)
+    "uniform float uActiveCY;",
+    "uniform vec3 uActEdge;",
+    "uniform vec3 uActBand;",
+    "uniform vec3 uActCore;",
+    "uniform vec3 uActTint;",
     "uniform vec3 uEdge[6];",
     "uniform vec3 uBand[6];",
     "uniform vec3 uCore[6];",
@@ -276,6 +300,7 @@
     "  float H = uRes.y;",
     "  float W = uRes.x;",
     "  float cx = W * 0.5;",
+    "  float cardW = hx * 2.0;",
 
     "  for(int i=0;i<6;i++){",
     "    float fi = float(i);",
@@ -283,136 +308,142 @@
 
     "    float cy = activeCY + (fi - uScroll) * stride;",
     "    float prox = clamp(1.0 - abs(fi - uScroll), 0.0, 1.0);",
-    "    float cardTop = cy - hy;",
-    "    float cardBottom = cy + hy;",
     "    vec2 p = uv - vec2(cx, cy);",
 
-    "    // Half-width: straight for resting; active flares from lower third to floor",
-    "    float hw = hx;",
-    "    float flareT = 0.0;",
+    "    // Resting: closed rounded card. Active: open silhouette —",
+    "    // rounded top, sides flare from lower third, NO bottom edge (extends to floor).",
+    "    float dBox = sdRoundBox(p, vec2(hx, hy), uRad);",
+    "    float d = dBox;",
+    "    float k = 0.0;",
     "    if(prox > 0.001){",
-    "      float yFlare0 = cy + hy * 0.12;", // start bend in lower half
-    "      flareT = clamp((uv.y - yFlare0) / max(H - yFlare0, 1.0), 0.0, 1.0);",
-    "      // Trumpet: gentle then opens — max width ~0.72*W at floor",
-    "      float open = pow(flareT, 1.5);",
-    "      hw = hx + open * (W * 0.32 - hx) * prox;",
+    "      float yFlare0 = cy + hy * 0.18;",
+    "      float tFlare = clamp((uv.y - yFlare0) / max(H - yFlare0, 1.0), 0.0, 1.0);",
+    "      float hw = hx + pow(tFlare, 1.55) * (W * 0.38 - hx) * prox;",
+    "      float topY = cy - hy;",
+    "      float midY = 0.5 * (topY + H);",
+    "      float halfY = 0.5 * (H - topY);",
+    "      // Open card to floor with variable half-width (approx SDF)",
+    "      float dOpen = sdRoundBox(uv - vec2(cx, midY), vec2(hw, halfY), uRad);",
+    "      // Above flare: keep exact card. Below: open flared body.",
+    "      float below = smoothstep(cy - hy * 0.05, cy + hy * 0.35, uv.y);",
+    "      k = cardW * 0.22 * prox;",
+    "      float dMix = smin(dBox, dOpen, max(k, 1.0));",
+    "      d = mix(dBox, dMix, below);",
+    "      float dFloor = H - uv.y;",
+    "      d = smin(d, dFloor, cardW * 0.18 * prox * below);",
     "    }",
 
-    "    // Open silhouette: top matches card top, bottom extends PAST the screen floor",
-    "    float bodyTop = cardTop;",
-    "    float bodyBot = mix(cardBottom, H + hy * 0.8, prox);",
-    "    float bodyMid = 0.5 * (bodyTop + bodyBot);",
-    "    float bodyHalf = 0.5 * (bodyBot - bodyTop);",
-    "    float dSil = sdRoundBox(uv - vec2(cx, bodyMid), vec2(hw, bodyHalf), uRad);",
+    "    float aa = 1.2;",
+    "    float cover = 1.0 - smoothstep(-aa, aa, d);",
+    "    if(cover < 0.002) continue;",
 
-    "    // Plain closed card (resting / upper glass region)",
-    "    float dCard = sdRoundBox(p, vec2(hx, hy), uRad);",
+    "    // Scene tint: previous card takes ACTIVE color (hi_a: green Amethyst)",
+    "    float tintAmt = (1.0 - prox) * 0.85;",
+    "    vec3 edgeCol = mix(uEdge[i], uActEdge, max(tintAmt, prox));",
+    "    vec3 bandCol = mix(uBand[i], uActBand, max(tintAmt * 0.9, prox));",
+    "    vec3 coreCol = mix(uCore[i], uActCore, max(tintAmt * 0.45, prox));",
+    "    vec3 tint = mix(uTint[i], uActTint, tintAmt * 0.8 + prox * 0.25);",
 
-    "    float aa = 1.15;",
-    "    float inCard = 1.0 - smoothstep(-aa, aa, dCard);",
-    "    float inSil = 1.0 - smoothstep(-aa, aa, dSil);",
-
-    "    // Soft volumetric light: axis bright, corners dark, NO hard floor shelf",
-    "    float vDepth = clamp((uv.y - (cy + hy * 0.25)) / max(H - (cy + hy * 0.25), 1.0), 0.0, 1.0);",
-    "    float ax = abs(uv.x - cx) / max(W * 0.5, 1.0);",
-    "    // Wide filled flood that soft-dies in corners (reads as volume, not fringe-beams)",
-    "    float lightEdge = mix(hx / (W * 0.5) * 1.15, 0.85, pow(clamp(vDepth,0.0,1.0), 0.9));",
-    "    float softSide = 1.0 - smoothstep(lightEdge * 0.55, lightEdge * 1.15, ax);",
-    "    softSide = pow(max(softSide, 0.0), 0.85);",
-    "    softSide *= 1.0 - smoothstep(0.55, 1.0, ax) * smoothstep(0.5, 1.0, vDepth);",
-    "    float lightMask = prox * softSide * smoothstep(0.0, 0.2, vDepth);",
-    "    float silSoft = 1.0 - smoothstep(-40.0, 55.0, dSil);",
-
-    "    float belowCard = smoothstep(cardBottom - 25.0, cardBottom + 35.0, uv.y);",
-    "    float insideGlow = prox * smoothstep(cy - hy * 0.05, cy + hy * 0.5, uv.y);",
-    "    // Below card prefer soft light mask (filled flood) over thin silhouette",
-    "    float lightCover = max(lightMask * 0.95, silSoft * lightMask);",
-    "    float glassCover = inCard;",
-    "    float cover = max(glassCover, lightCover);",
-
-    "    if(cover < 0.003 && inCard < 0.003) continue;",
-
-    "    vec3 edgeCol = uEdge[i];",
-    "    vec3 bandCol = uBand[i];",
-    "    vec3 coreCol = uCore[i];",
-    "    vec3 tint = uTint[i];",
-
-    "    // Border: top+sides of card; fade out bottom edge when active (no shelf line)",
-    "    float borderCard = smoothstep(1.15 + aa, 1.15 - aa, abs(dCard));",
-    "    float bottomEdgeKill = 1.0 - smoothstep(cardBottom - hy * 0.35, cardBottom - 2.0, uv.y) * prox;",
-    "    borderCard *= mix(1.0, bottomEdgeKill, prox);",
-    "    float borderSil = smoothstep(1.8 + aa, 1.8 - aa, abs(dSil));",
-    "    float sideOnly = smoothstep(hx * 0.55, hx * 0.95, abs(p.x));",
-    "    float fadeDown = 1.0 - smoothstep(cy + hy * 0.15, cardBottom + (H - cardBottom) * 0.35, uv.y);",
-    "    float border = borderCard;",
-    "    border = max(border, borderSil * sideOnly * fadeDown * prox * smoothstep(0.0, 0.25, flareT) * 0.75);",
-    "    border *= 1.0 - smoothstep(H - 28.0, H - 2.0, uv.y) * prox;",
+    "    // Border: top + upper sides always; lower sides only along the fillet curve",
+    "    float border = smoothstep(1.1 + aa, 1.1 - aa, abs(d));",
+    "    float sideBias = smoothstep(hx * 0.45, hx * 0.92, abs(p.x));",
+    "    float upperBand = 1.0 - smoothstep(cy + hy * 0.05, cy + hy * 0.45, uv.y);",
+    "    float floorKill = smoothstep(H - 60.0, H - 4.0, uv.y);",
+    "    float borderMask = mix(1.0, max(upperBand, sideBias * 0.9), prox);",
+    "    borderMask *= 1.0 - floorKill * prox;",
+    "    // Never stroke the original closed-card bottom",
+    "    borderMask *= mix(1.0, sideBias, prox * smoothstep((cy+hy) - uRad*3.0, (cy+hy) + 8.0, uv.y));",
+    "    border *= borderMask;",
 
     "    float sheen = 0.0;",
     "    if(uMaterial < 0.5){",
-    "      float diag = (p.x * 0.3 + p.y * 0.55) / max(hx, 1.0);",
-    "      sheen = smoothstep(-0.4, 0.5, diag) * smoothstep(1.3, 0.2, diag) * 0.09;",
+    "      float diag = (p.x * 0.28 + p.y * 0.55) / max(hx, 1.0);",
+    "      sheen = smoothstep(-0.35, 0.55, diag) * smoothstep(1.25, 0.2, diag) * 0.1;",
+    "      // Active-colored sheen bleed onto previous card",
+    "      sheen += tintAmt * 0.04;",
     "    } else {",
-    "      sheen = 0.03 + 0.03 * sin(p.y * 0.42);",
+    "      sheen = 0.03 + 0.03 * sin(p.y * 0.4);",
     "    }",
 
-    "    vec3 baseFill;",
+    "    vec3 glass;",
     "    if(uTheme < 0.5){",
-    "      baseFill = (uMaterial < 0.5) ? (tint + vec3(0.012) + sheen) : (mix(vec3(0.05), tint*2.0, 0.55) + sheen);",
+    "      glass = (uMaterial < 0.5) ? (tint + vec3(0.01) + sheen) : (mix(vec3(0.05), tint * 2.2, 0.55) + sheen);",
     "    } else {",
-    "      baseFill = mix(vec3(0.94), tint*2.0 + vec3(0.85), 0.2) + sheen*0.4;",
+    "      glass = mix(vec3(0.94), tint * 2.0 + vec3(0.85), 0.22) + sheen * 0.4;",
     "    }",
 
-    "    // Smile + floodlight colors",
-    "    float nx = clamp(p.x / max(hx, 1.0), -1.0, 1.0);",
-    "    // Smile around lower-middle; keep upper card mostly dark glass",
-    "    float arcY = mix(hy * 0.42, -hy * 0.12, pow(abs(nx), 1.6));",
-    "    float belowArc = uv.y - (cy + arcY);",
-    "    float front = smoothstep(-6.0, 36.0, belowArc);",
+    "    // ---- Interior light (active) ----",
+    "    vec3 fill = glass;",
+    "    if(prox > 0.01){",
+    "      float nx = clamp(p.x / max(hx, 1.0), -1.0, 1.0);",
+    "      // Smile in lower-middle: thick saturated band ~40-60px desktop",
+    "      float arcY = mix(hy * 0.22, -hy * 0.35, pow(abs(nx), 1.55));",
+    "      float belowArc = uv.y - (cy + arcY);",
+    "      float bandH = max(hx * 0.16, 28.0);", // ~40-60px full band at desktop
+    "      float front = smoothstep(-bandH * 0.4, bandH * 1.1, belowArc);",
+    "      float ribbon = exp(-pow(belowArc / (bandH * 1.15), 2.0));",
 
-    "    float fromBottom = clamp((H - uv.y) / max(H - cardBottom + hy * 0.6, 1.0), 0.0, 2.5);",
-    "    float rx = (uv.x - cx) / max(hx * 2.35, 1.0);",
-    "    float cone = exp(-rx * rx * 1.2) * softSide;",
+    "      // Axis cone — soft flood, dark corners",
+    "      float ax = abs(uv.x - cx) / max(W * 0.5, 1.0);",
+    "      float vT = clamp((uv.y - (cy - hy * 0.1)) / max(H - (cy - hy * 0.1), 1.0), 0.0, 1.0);",
+    "      float cone = exp(-pow(ax / mix(0.42, 0.78, pow(vT, 1.1)), 2.0) * 1.6);",
+    "      cone *= 1.0 - smoothstep(0.5, 1.05, ax) * smoothstep(0.45, 1.0, vT);",
 
-    "    float coreAmt = exp(-pow((fromBottom - 0.15) / 0.28, 2.0)) * cone;",
-    "    float midAmt = exp(-fromBottom * fromBottom * 1.7) * cone;",
-    "    float bandLine = exp(-pow((belowArc - 2.0) / 22.0, 2.0)) * cone;",
+    "      float fromBottom = clamp((H - uv.y) / max(H * 0.55, 1.0), 0.0, 2.0);",
+    "      // Mint-white core (NOT pure white): #cbffe6 .. #e8fff4",
+    "      vec3 mintCore = mix(coreCol, vec3(0.80, 1.0, 0.90), 0.5);", // #cbffe6 family, not #fff
+    "      float coreAmt = exp(-pow((fromBottom - 0.12) / 0.26, 2.0)) * cone;",
 
-    "    // Flood: saturated color rising to white, mint-tint near floor (matches ref)",
-    "    vec3 flood = mix(edgeCol * 3.0, coreCol, clamp(coreAmt * 1.2 + midAmt * 0.35, 0.0, 1.0));",
-    "    // Saturated smile ribbon",
-    "    vec3 satBand = vec3(min(edgeCol.r*1.1+bandCol.r*0.6,1.0), min(edgeCol.g*6.2+0.25,1.0), min(edgeCol.b*1.4+bandCol.b*0.6,1.0));",
-    "    float ribbon = clamp(bandLine * front * 3.0, 0.0, 1.0);",
-    "    vec3 glow = mix(flood, satBand, ribbon);",
-    "    glow = mix(glow, coreCol, clamp(coreAmt * 1.1, 0.0, 1.0));",
-    "    // Soft mint (not blown white) at extreme bottom",
-    "    glow = mix(glow, mix(coreCol, edgeCol * 2.0, 0.4), smoothstep(0.25, 0.0, fromBottom) * softSide * 0.55);",
+    "      // Thick saturated band: deep bandCol → vivid mint (#2fd18a/#5fe0a8 family)",
+    "      vec3 vivid = vec3(",
+    "        min(uActEdge.r * 0.9 + 0.08, 1.0),",
+    "        min(uActEdge.g * 5.5 + 0.45, 1.0),",
+    "        min(uActEdge.b * 1.4 + 0.35, 1.0)",
+    "      );",
+    "      // #2fd18a-ish mid, #5fe0a8 high",
+    "      vec3 mintSat = vec3(0.18, 0.82, 0.54);",
+    "      vec3 mintHi = vec3(0.37, 0.88, 0.66);",
+    "      vec3 satBand = mix(uActBand * 3.2, mix(mintSat, mintHi, 0.45) * 0.5 + vivid * 0.55, 0.75);",
 
-    "    // Lit below smile; force continuity across cardBottom into floor",
-    "    float lit = clamp(front * max(midAmt * 1.15, lightMask * 0.8), 0.0, 1.0) * prox;",
-    "    float throughFloor = lightMask * smoothstep(cy + hy * 0.1, H, uv.y);",
-    "    lit = max(lit, throughFloor);",
-    "    vec3 fill = mix(baseFill, glow, clamp(lit, 0.0, 1.0));",
-    "    fill += coreCol * coreAmt * 0.45 * prox;",
-    "    float keep = max(inCard, lightMask);",
-    "    fill = mix(bg, fill, clamp(keep, 0.0, 1.0));",
+    "      vec3 glow = glass;",
+    "      glow = mix(glow, satBand, clamp(ribbon * front * 1.8, 0.0, 1.0));",
+    "      // Below ribbon: mint flood, only core goes near-white mint",
+    "      vec3 flood = mix(vivid * 0.85, mintCore, clamp(coreAmt * 1.1 + (1.0 - fromBottom) * 0.25, 0.0, 1.0));",
+    "      flood = mix(flood, mintCore, clamp(coreAmt, 0.0, 1.0));",
+    "      glow = mix(glow, flood, clamp(front * cone * 0.95, 0.0, 1.0));",
 
-    "    // Chromatic fringe 2-4px on flare curve only, fades before floor",
-    "    float onFlare = prox * smoothstep(0.0, 0.2, flareT) * (1.0 - smoothstep(0.45, 0.75, flareT));",
-    "    onFlare *= smoothstep(hx * 0.7, hx * 0.95 + (hw - hx) * 0.3, abs(p.x));",
-    "    float ed = dSil;",
-    "    float fw = 3.8;",
-    "    float outerF = exp(-pow((ed - 1.2) / fw, 2.0)) * step(-0.5, ed);",
-    "    float innerF = exp(-pow((ed + 1.5) / fw, 2.0)) * step(ed, 0.5);",
-    "    vec3 chroma = vec3(1.0, 0.28, 0.6) * outerF * onFlare * 1.65;",
-    "    chroma += vec3(0.1, 0.95, 1.0) * innerF * onFlare * 1.5;",
+    "      fill = mix(glass, glow, prox);",
+    "      // Corner haze: fade fill to bg in lower corners (soft fog cone)",
+    "      float haze = cone;",
+    "      fill = mix(bg, fill, mix(1.0, haze, smoothstep(cy, H, uv.y) * prox));",
+    "    }",
 
-    "    vec3 edgeMix = mix(edgeCol * 1.4, mix(edgeCol, vec3(0.4), 0.35), uTheme);",
-    "    vec3 pix = mix(fill, edgeMix, border * 0.88);",
+    "    // Chromatic fringe ONLY on the curved fillet (where smin bends the side)",
+    "    float fillet = 0.0;",
+    "    if(prox > 0.05){",
+    "      fillet = clamp((dBox - d) / max(cardW * 0.12, 1.0), 0.0, 1.0);",
+    "      fillet *= smoothstep(cy + hy * 0.0, cy + hy * 0.7, uv.y);",
+    "      fillet *= 1.0 - smoothstep(H - 80.0, H - 10.0, uv.y);",
+    "      fillet *= smoothstep(hx * 0.6, hx * 1.05, abs(p.x));",
+    "    }",
+    "    float fw = 3.2;",
+    "    float outerF = exp(-pow((d - 1.0) / fw, 2.0)) * step(-0.2, d);",
+    "    float innerF = exp(-pow((d + 1.2) / fw, 2.0)) * (1.0 - step(0.4, d));",
+    "    vec3 chroma = vec3(1.0, 0.3, 0.62) * outerF * fillet * 1.4;",
+    "    chroma += vec3(0.1, 0.95, 1.0) * innerF * fillet * 1.3;",
+
+    "    vec3 edgeMix = mix(edgeCol * 1.35, mix(edgeCol, vec3(0.4), 0.3), uTheme);",
+    "    vec3 pix = mix(fill, edgeMix, border * 0.9);",
     "    pix += chroma;",
 
-    "    float a = max(cover, border * 0.95);",
-    "    col = mix(col, pix, clamp(a, 0.0, 1.0));",
+    "    // Soft outer alpha on flood region (hazy edge, not hard trapezoid)",
+    "    float a = cover;",
+    "    if(prox > 0.01){",
+    "      float ax2 = abs(uv.x - cx) / max(W * 0.5, 1.0);",
+    "      float softA = 1.0 - smoothstep(0.62, 1.05, ax2) * smoothstep(cy + hy * 0.2, H, uv.y);",
+    "      a *= mix(1.0, softA, 0.85);",
+    "    }",
+    "    col = mix(col, pix, clamp(max(a, border * 0.95), 0.0, 1.0));",
     "  }",
 
     "  gl_FragColor = vec4(col, 1.0);",
@@ -466,6 +497,10 @@
       "uTheme",
       "uMaterial",
       "uActiveCY",
+      "uActEdge",
+      "uActBand",
+      "uActCore",
+      "uActTint",
       "uEdge",
       "uBand",
       "uCore",
@@ -523,8 +558,24 @@
     gl.uniform1f(glState.loc.uRad, L.radius * scale);
     gl.uniform1f(glState.loc.uTheme, root.dataset.theme === "light" ? 1 : 0);
     gl.uniform1f(glState.loc.uMaterial, root.dataset.material === "metal" ? 1 : 0);
-    var activeCY = activeCardCenterY(L.h, L.cardH) * scale;
+    var activeCY = activeCardCenterY(L.h, L.cardH, L.gap, L.w) * scale;
     gl.uniform1f(glState.loc.uActiveCY, activeCY);
+    // Scene tint from (interpolated) active card
+    var ai = Math.max(0, Math.min(N - 1, Math.round(scroll)));
+    var aCard = CARDS[ai];
+    // Soft crossfade while scrolling
+    var af = scroll;
+    var i0 = Math.max(0, Math.min(N - 1, Math.floor(af)));
+    var i1 = Math.max(0, Math.min(N - 1, Math.ceil(af)));
+    var ft = af - Math.floor(af);
+    function mix3(a, b, t) {
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    }
+    var c0 = CARDS[i0], c1 = CARDS[i1];
+    gl.uniform3fv(glState.loc.uActEdge, mix3(c0.edge, c1.edge, ft));
+    gl.uniform3fv(glState.loc.uActBand, mix3(c0.band, c1.band, ft));
+    gl.uniform3fv(glState.loc.uActCore, mix3(c0.core, c1.core, ft));
+    gl.uniform3fv(glState.loc.uActTint, mix3(c0.tint, c1.tint, ft));
     setColorArray(gl, glState.loc, "uEdge");
     setColorArray(gl, glState.loc, "uBand");
     setColorArray(gl, glState.loc, "uCore");
