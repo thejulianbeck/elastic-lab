@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "elastic-lab-v2-smin-fillet-20261005z";
+  var BUILD = "elastic-lab-v2-smin-fillet-20261005aa";
 
   var CARDS = [
     {
@@ -111,7 +111,7 @@
       var el = document.createElement("div");
       el.className = "card-dom";
       el.dataset.index = String(i);
-      el.innerHTML =
+      var face =
         '<div class="chip">' +
         CHIP_SVG +
         "</div>" +
@@ -123,7 +123,49 @@
         "</p>" +
         '<p class="digits">•••• ' +
         c.digits +
-        "</p>" +
+        "</p>";
+      // Progressive blur: 5 band-limited layers, ease-in radii (final ~18px)
+      function pLayer(r, y0, y1) {
+        var a = Math.max(0, y0 - 6);
+        var b = y0 + 3;
+        var c = y1 - 3;
+        var d = Math.min(100, y1 + 8);
+        var mask =
+          "linear-gradient(to bottom,transparent 0%,transparent " +
+          a +
+          "%,#000 " +
+          b +
+          "%,#000 " +
+          c +
+          "%,transparent " +
+          d +
+          "%,transparent 100%)";
+        return (
+          '<div class="pblur-layer" style="--pblur:' +
+          r +
+          "px;-webkit-mask-image:" +
+          mask +
+          ";mask-image:" +
+          mask +
+          '"><div class="pblur-clone">' +
+          face +
+          "</div></div>"
+        );
+      }
+      // Bands start at smile (~40%), ease-in toward bottom; neighbors overlap ~10%
+      var pblur =
+        '<div class="pblur" aria-hidden="true">' +
+        pLayer(3.2, 38, 56) +
+        pLayer(6.0, 48, 66) +
+        pLayer(9.5, 58, 76) +
+        pLayer(13.5, 68, 88) +
+        pLayer(18.0, 78, 102) +
+        "</div>";
+      el.innerHTML =
+        '<div class="card-face">' +
+        face +
+        "</div>" +
+        pblur +
         '<div class="veil"></div>';
       cardsDom.appendChild(el);
 
@@ -228,22 +270,30 @@
       el.style.opacity = visible ? "1" : "0";
       el.style.visibility = visible ? "visible" : "hidden";
       el.classList.toggle("is-active", isActive);
-      // Active: no box chrome — mask away bottom so DOM never shows bottom corners
+      // Active: no box chrome; fade sharp face into progressive blur (not whole card)
+      el.style.webkitMaskImage = "";
+      el.style.maskImage = "";
       if (isActive) {
-        el.style.webkitMaskImage =
-          "linear-gradient(to bottom, #000 0%, #000 42%, rgba(0,0,0,0.55) 58%, transparent 78%)";
-        el.style.maskImage =
-          "linear-gradient(to bottom, #000 0%, #000 42%, rgba(0,0,0,0.55) 58%, transparent 78%)";
         el.style.borderRadius = L.radius + "px " + L.radius + "px 0 0";
       } else {
-        el.style.webkitMaskImage = "";
-        el.style.maskImage = "";
         el.style.borderRadius = L.radius + "px";
       }
-
+      var faceEl = el.querySelector(".card-face");
+      if (faceEl) {
+        if (isActive) {
+          faceEl.style.webkitMaskImage =
+            "linear-gradient(to bottom, #000 0%, #000 40%, rgba(0,0,0,0.7) 52%, transparent 70%)";
+          faceEl.style.maskImage =
+            "linear-gradient(to bottom, #000 0%, #000 40%, rgba(0,0,0,0.7) 52%, transparent 70%)";
+        } else {
+          faceEl.style.webkitMaskImage = "";
+          faceEl.style.maskImage = "";
+        }
+      }
       var veil = el.querySelector(".veil");
       var merge = Math.max(0, 1 - dist);
-      veil.style.opacity = String(Math.pow(merge, 1.15) * 0.98);
+      // Veil reduced — progressive blur carries the dissolve
+      veil.style.opacity = String(Math.pow(merge, 1.15) * 0.22);
     }
   }
 
@@ -332,7 +382,17 @@
     "      float below = smoothstep(cy - hy * 0.02, cy + hy * 0.16, uv.y);",
     "      d = mix(dBox, d, below);",
     "    }",
+    "    // Progressive fog soft edge: aa grows below card + off-axis (eased)",
     "    float aa = 1.2;",
+    "    if(prox > 0.01){",
+    "      float axS = abs(uv.x - cx) / max(W * 0.5, 1.0);",
+    "      float belowS = smoothstep(cy + hy * 0.05, H, uv.y);",
+    "      belowS = belowS * belowS * (3.0 - 2.0 * belowS);",
+    "      float offAx = smoothstep(0.12, 0.92, axS);",
+    "      offAx = offAx * offAx * (3.0 - 2.0 * offAx);",
+    "      float fog = clamp(belowS * mix(0.25, 1.0, offAx), 0.0, 1.0);",
+    "      aa = mix(1.2, 16.0, fog);",
+    "    }",
     "    float cover = 1.0 - smoothstep(-aa, aa, d);",
     "    if(cover < 0.002) continue;",
 
@@ -450,7 +510,8 @@
     "      fillet *= 1.0 - smoothstep(H - 80.0, H - 10.0, uv.y);",
     "      fillet *= smoothstep(hx * 0.6, hx * 1.05, abs(p.x));",
     "    }",
-    "    float fw = 3.2;",
+    "    // Fringe stays thin/crisp near the card fillet; slightly softer only far below",
+    "    float fw = mix(2.4, 4.0, clamp((uv.y - (cy + hy * 0.5)) / max(H - (cy + hy * 0.5), 1.0), 0.0, 1.0));",
     "    float outerF = exp(-pow((d - 1.0) / fw, 2.0)) * step(-0.2, d);",
     "    float innerF = exp(-pow((d + 1.2) / fw, 2.0)) * (1.0 - step(0.4, d));",
     "    vec3 chroma = vec3(1.0, 0.3, 0.62) * outerF * fillet * 1.4;",
@@ -464,8 +525,10 @@
     "    float a = cover;",
     "    if(prox > 0.01){",
     "      float ax2 = abs(uv.x - cx) / max(W * 0.5, 1.0);",
-    "      float softA = 1.0 - smoothstep(0.88, 1.15, ax2) * smoothstep(cy + hy * 0.5, H, uv.y);",
-    "      a *= mix(1.0, softA, 0.35);",
+    "      float deep = smoothstep(cy + hy * 0.2, H, uv.y);",
+    "      deep = deep * deep * (3.0 - 2.0 * deep);",
+    "      float softA = 1.0 - smoothstep(0.72, 1.12, ax2) * deep;",
+    "      a *= mix(1.0, softA, mix(0.2, 0.55, deep));",
     "    }",
     "    col = mix(col, pix, clamp(max(a, border * 0.95), 0.0, 1.0));",
     "  }",

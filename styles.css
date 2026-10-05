@@ -148,25 +148,68 @@ html[data-theme="light"] .card-dom {
   font-variant-numeric: tabular-nums;
 }
 
+.card-dom .card-face {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .card-dom .veil {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
   opacity: 0;
+  /* Reduced wash — progressive blur does the dissolve */
   background:
-    radial-gradient(ellipse 140% 85% at 50% 110%, rgba(255,255,255,1) 0%, rgba(255,255,255,0.55) 28%, transparent 65%),
-    linear-gradient(
-      to bottom,
-      transparent 0%,
-      transparent 28%,
-      rgba(255, 255, 255, 0.2) 45%,
-      rgba(255, 255, 255, 0.75) 62%,
-      rgba(255, 255, 255, 0.95) 100%
-    );
+    radial-gradient(ellipse 120% 70% at 50% 115%, rgba(255,255,255,0.35) 0%, transparent 55%);
   mix-blend-mode: screen;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 22%, #000 48%, #000 100%);
-  mask-image: linear-gradient(to bottom, transparent 0%, transparent 22%, #000 48%, #000 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, transparent 40%, #000 70%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, transparent 40%, #000 70%, #000 100%);
+}
+
+/* Progressive blur stack (jh3yy-style): N layers, increasing filter blur + band masks */
+.card-dom .pblur {
+  display: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.card-dom.is-active .pblur {
+  display: block;
+}
+
+.card-dom .pblur-layer {
+  position: absolute;
+  inset: 0;
+  /* filter:blur on clone only — avoids muddying the WebGL light underneath */
+}
+
+.card-dom .pblur-clone {
+  position: absolute;
+  inset: 0;
+  filter: blur(var(--pblur));
+  -webkit-filter: blur(var(--pblur));
+  transform: translateZ(0);
+  color: inherit;
+}
+
+.card-dom .pblur-clone .chip,
+.card-dom .pblur-clone .icon,
+.card-dom .pblur-clone .name,
+.card-dom .pblur-clone .digits {
+  /* same layout as face */
+}
+
+/* Avoid 5× blur cost on inactive / offscreen cards */
+@media (prefers-reduced-motion: reduce) {
+  .card-dom .pblur {
+    display: none !important;
+  }
 }
 
 html[data-theme="light"] .card-dom .veil {
