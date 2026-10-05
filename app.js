@@ -1,459 +1,643 @@
 (function () {
   "use strict";
 
-  var SPRING_K = 210;
-  var SPRING_C = 14.6;
-  var PIXELS = 112;
+  var BUILD = "elastic-lab-v2-sdf-bell-20261005";
+
+  var CARDS = [
+    {
+      name: "Amethyst",
+      digits: "3165",
+      edge: [0x3f / 255, 0x16 / 255, 0x86 / 255],
+      band: [0x29 / 255, 0x10 / 255, 0x54 / 255],
+      core: [0xe7 / 255, 0xcf / 255, 0xfe / 255],
+      tint: [0.039, 0.024, 0.067],
+      icon: "pyramid",
+    },
+    {
+      name: "Verdant",
+      digits: "4282",
+      edge: [0x1e / 255, 0x62 / 255, 0x44 / 255],
+      band: [0x19 / 255, 0x38 / 255, 0x2b / 255],
+      core: [0xcb / 255, 0xff / 255, 0xe6 / 255],
+      tint: [0.02, 0.055, 0.04],
+      icon: "leaf",
+    },
+    {
+      name: "Ember",
+      digits: "5399",
+      edge: [0x86 / 255, 0x29 / 255, 0x12 / 255],
+      band: [0x4f / 255, 0x1c / 255, 0x14 / 255],
+      core: [0xfd / 255, 0xf6 / 255, 0xdb / 255],
+      tint: [0.06, 0.03, 0.02],
+      icon: "star",
+    },
+    {
+      name: "Glacier",
+      digits: "6516",
+      edge: [0x1c / 255, 0x5d / 255, 0x80 / 255],
+      band: [0x13 / 255, 0x3a / 255, 0x52 / 255],
+      core: [0xec / 255, 0xff / 255, 0xff / 255],
+      tint: [0.025, 0.045, 0.06],
+      icon: "waves",
+    },
+    {
+      name: "Graphite",
+      digits: "7633",
+      edge: [0x3a / 255, 0x41 / 255, 0x4f / 255],
+      band: [0x27 / 255, 0x27 / 255, 0x2f / 255],
+      core: [0xf2 / 255, 0xf5 / 255, 0xfc / 255],
+      tint: [0.04, 0.042, 0.05],
+      icon: "planet",
+    },
+    {
+      name: "Sapphire",
+      digits: "8744",
+      edge: [0x1b / 255, 0x36 / 255, 0x7b / 255],
+      band: [0x19 / 255, 0x24 / 255, 0x3f / 255],
+      core: [0xcc / 255, 0xd4 / 255, 0xf0 / 255],
+      tint: [0.025, 0.035, 0.07],
+      icon: "sunset",
+    },
+  ];
+
+  var N = CARDS.length;
   var root = document.documentElement;
-  var stack = document.getElementById("stack");
-  var mount = document.getElementById("beam-mount");
-  var canvas = document.getElementById("beam");
-  var cssBeam = document.getElementById("beam-css");
-  var prevBtn = document.getElementById("prev");
-  var nextBtn = document.getElementById("next");
-  var live = document.getElementById("live");
-  var cards = Array.prototype.slice.call(stack.querySelectorAll(".card"));
-  var count = cards.length;
+  var canvas = document.getElementById("gl");
+  var cardsDom = document.getElementById("cards-dom");
+  var counterEl = document.getElementById("counter");
+  var dotsEl = document.getElementById("dots");
+  var liveEl = document.getElementById("live");
+  var fallback = document.getElementById("fallback");
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-  var reduced = motionQuery.matches;
-
-  var position = 0;
-  var velocity = 0;
+  var scroll = 0;
   var target = 0;
+  var vel = 0;
   var dragging = false;
   var pointerId = null;
-  var dragY = 0;
-  var dragT = 0;
-  var displayVel = 0;
-  var announced = -1;
-  var wheelAcc = 0;
-  var wheelStamp = 0;
-  var last = 0;
-  var running = true;
-  var beamTime = 0;
+  var dragStartY = 0;
+  var dragStartScroll = 0;
+  var wheelLock = 0;
+  var lastTs = 0;
+  var layout = { w: 0, h: 0, dpr: 1, cardW: 0, cardH: 0, gap: 0, radius: 0 };
 
-  var glState = initGL(canvas);
-  root.dataset.beam = glState ? "gl" : "css";
+  var ICONS = {
+    pyramid:
+      '<svg viewBox="0 0 24 24"><path d="M12 4 L20 19 H4 Z"/><path d="M12 4 V19"/><path d="M7.5 12.5 H16.5"/></svg>',
+    leaf:
+      '<svg viewBox="0 0 24 24"><path d="M5 18 C5 10 10 3 19 4 C18 14 12 19 5 18 Z"/><path d="M19 4 C14 10 10 15 7 20"/></svg>',
+    star:
+      '<svg viewBox="0 0 24 24"><path d="M12 3 L13.2 10.2 L20 12 L13.2 13.8 L12 21 L10.8 13.8 L4 12 L10.8 10.2 Z"/></svg>',
+    waves:
+      '<svg viewBox="0 0 24 24"><path d="M4 9 C7 6 10 6 13 9 C16 12 19 12 22 9"/><path d="M4 13 C7 10 10 10 13 13 C16 16 19 16 22 13"/><path d="M4 17 C7 14 10 14 13 17 C16 20 19 20 22 17"/></svg>',
+    planet:
+      '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5.5"/><ellipse cx="12" cy="12" rx="10" ry="3.2" transform="rotate(-24 12 12)"/></svg>',
+    sunset:
+      '<svg viewBox="0 0 24 24"><path d="M12 5 V9"/><path d="M6.2 8.2 L8.5 10.5"/><path d="M17.8 8.2 L15.5 10.5"/><path d="M5 14 H19"/><path d="M7 17 H17"/><path d="M9 20 H15"/><path d="M7 14 A5 5 0 0 1 17 14"/></svg>',
+  };
 
-  cards.forEach(function (card, index) {
-    card.dataset.index = String(index);
-    card.setAttribute("aria-hidden", index === 0 ? "false" : "true");
-  });
+  var CHIP_SVG =
+    '<svg viewBox="0 0 40 30">' +
+    '<rect x="1" y="1" width="38" height="28" rx="4"/>' +
+    '<path d="M1 10 H39 M1 20 H39 M14 1 V29 M26 1 V29"/>' +
+    '<rect x="14" y="10" width="12" height="10" rx="1.5"/>' +
+    "</svg>";
 
-  function clamp(v, a, b) {
-    return Math.max(a, Math.min(b, v));
+  /* -------------------- DOM cards & UI -------------------- */
+  function buildDom() {
+    cardsDom.innerHTML = "";
+    dotsEl.innerHTML = "";
+    CARDS.forEach(function (c, i) {
+      var el = document.createElement("div");
+      el.className = "card-dom";
+      el.dataset.index = String(i);
+      el.innerHTML =
+        '<div class="chip">' +
+        CHIP_SVG +
+        "</div>" +
+        '<div class="icon">' +
+        ICONS[c.icon] +
+        "</div>" +
+        '<p class="name">' +
+        c.name.toUpperCase() +
+        "</p>" +
+        '<p class="digits">•••• ' +
+        c.digits +
+        "</p>" +
+        '<div class="veil"></div>';
+      cardsDom.appendChild(el);
+
+      var d = document.createElement("span");
+      d.setAttribute("aria-label", c.name);
+      dotsEl.appendChild(d);
+    });
+
+    var list = document.getElementById("fallback-list");
+    list.innerHTML = CARDS.map(function (c) {
+      return (
+        "<li><strong>" +
+        c.name.toUpperCase() +
+        "</strong><span>•••• " +
+        c.digits +
+        "</span></li>"
+      );
+    }).join("");
   }
 
-  function cardCopy(card) {
-    return (
-      card.querySelector(".kicker").textContent +
-      ". " +
-      card.querySelector("h2").textContent +
-      ". " +
-      card.querySelector(".body").textContent
-    );
-  }
-
-  function beamColor(index) {
-    return cards[index].getAttribute("data-beam").split(",").map(Number);
-  }
-
-  function setTheme(theme) {
-    root.dataset.theme = theme;
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", theme === "light" ? "#f6f1e8" : "#0c0e13");
-    syncToggles();
-  }
-
-  function setMaterial(material) {
-    root.dataset.material = material;
-    syncToggles();
+  function syncChrome() {
+    var i = Math.round(target);
+    i = Math.max(0, Math.min(N - 1, i));
+    var c = CARDS[i];
+    var n = String(i + 1).padStart(2, "0");
+    counterEl.innerHTML = c.name + " <span>" + n + " / 0" + N + "</span>";
+    Array.prototype.forEach.call(dotsEl.children, function (d, idx) {
+      if (idx === i) d.setAttribute("aria-current", "true");
+      else d.removeAttribute("aria-current");
+    });
+    if (liveEl && liveEl._last !== i) {
+      liveEl._last = i;
+      liveEl.textContent = c.name + ", tarjeta " + n + " de 0" + N;
+    }
   }
 
   function syncToggles() {
-    var theme = root.dataset.theme;
-    var material = root.dataset.material;
-    Array.prototype.forEach.call(document.querySelectorAll("[data-set-theme]"), function (btn) {
-      btn.setAttribute("aria-pressed", btn.getAttribute("data-set-theme") === theme ? "true" : "false");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-theme]"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-theme") === root.dataset.theme ? "true" : "false");
     });
-    Array.prototype.forEach.call(document.querySelectorAll("[data-set-material]"), function (btn) {
-      btn.setAttribute("aria-pressed", btn.getAttribute("data-set-material") === material ? "true" : "false");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-material]"), function (b) {
+      b.setAttribute(
+        "aria-pressed",
+        b.getAttribute("data-material") === root.dataset.material ? "true" : "false"
+      );
     });
   }
 
-  function activeIndex() {
-    if (dragging) return clamp(Math.round(position), 0, count - 1);
-    return target;
-  }
-
-  function layout(overshoot) {
-    var active = activeIndex();
-    for (var i = 0; i < count; i++) {
-      var rel = i - position;
-      var influence = Math.exp(-rel * rel * 4.8);
-      var baseY;
-      if (rel >= 0) baseY = -54 * (1 - Math.exp(-rel * 1.15));
-      else baseY = rel * rel * 180;
-      var y = baseY + influence * overshoot * 150;
-      var scale = 1 - Math.min(Math.max(rel, 0), 3) * 0.046;
-      if (rel < 0) scale = Math.max(0.86, 1 + rel * 0.1);
-      if (overshoot > 0) scale *= 1 + influence * overshoot * 0.34;
-      var opacity = 1;
-      if (rel < 0) opacity = Math.max(0, 1 + rel * 1.35);
-      if (rel > 3.1) opacity = Math.max(0, 1 - (rel - 3.1));
-      var z = rel < 0 ? 20 : 80 - rel * 8;
-      if (i === active) z = 140;
-      var card = cards[i];
-      card.style.transform =
-        "translate(-50%, -50%) translateY(" + y.toFixed(2) + "px) scale(" + scale.toFixed(4) + ")";
-      card.style.opacity = String(opacity);
-      card.style.zIndex = String(Math.round(z));
-      var title = card.querySelector("h2");
-      var body = card.querySelector(".body");
-      var kicker = card.querySelector(".kicker");
-      var on = i === active;
-      title.style.opacity = on ? "1" : "0";
-      body.style.opacity = on ? "1" : "0";
-      kicker.style.opacity = on ? "1" : (rel > 0.18 && rel < 1.4 ? "0.9" : "0");
-      card.toggleAttribute("data-active", on);
-      card.setAttribute("aria-hidden", on ? "false" : "true");
-    }
-    placeBeam(cards[active]);
-    paintBeam(beamColor(active));
-    root.style.setProperty("--glow", cards[active].getAttribute("data-glow"));
-    root.style.setProperty("--glow-edge", cards[active].style.getPropertyValue("--beam-css").trim() || cards[active].getAttribute("data-glow"));
-    prevBtn.disabled = active <= 0;
-    nextBtn.disabled = active >= count - 1;
-    if (announced !== active) {
-      announced = active;
-      live.textContent = cardCopy(cards[active]);
-    }
-  }
-
-  function placeBeam(card) {
-    var stackRect = stack.getBoundingClientRect();
-    var rect = card.getBoundingClientRect();
-    var width = Math.max(80, rect.width * 0.84);
-    var height = Math.max(150, rect.height * 0.92);
-    mount.hidden = false;
-    mount.style.width = width.toFixed(1) + "px";
-    mount.style.height = height.toFixed(1) + "px";
-    mount.style.left = (rect.left - stackRect.left + (rect.width - width) / 2).toFixed(1) + "px";
-    mount.style.top = (rect.bottom - stackRect.top - 10).toFixed(1) + "px";
-  }
-
-  function paintBeam(color) {
-    var stretch = reduced ? 1 : 1 + Math.min(Math.abs(displayVel), 6) * 0.09;
-    var skew = reduced ? 0 : clamp(displayVel, -6, 6) * 1.1;
-    cssBeam.style.setProperty("--beam-css", "rgb(" + color.map(function (c) { return Math.round(c * 255); }).join(",") + ")");
-    cssBeam.style.setProperty("--beam-hot", root.dataset.theme === "light" ? cssBeam.style.getPropertyValue("--beam-css") : "rgba(255,255,255,0.86)");
-    cssBeam.style.transform = reduced ? "none" : "scaleY(" + stretch.toFixed(3) + ") skewX(" + skew.toFixed(2) + "deg)";
-    if (!glState) return;
+  /* -------------------- Layout -------------------- */
+  function computeLayout() {
+    var w = window.innerWidth;
+    var h = window.innerHeight;
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var cssW = mount.clientWidth || 1;
-    var cssH = mount.clientHeight || 1;
-    var bw = Math.max(1, Math.round(cssW * dpr));
-    var bh = Math.max(1, Math.round(cssH * dpr));
-    drawGL(glState, bw, bh, color, reduced ? 0 : displayVel, reduced ? 0 : beamTime, reduced, root.dataset.theme === "dark");
+    var cardW;
+    if (w <= 480) cardW = w * 0.86;
+    else cardW = Math.min(502, w * 0.392);
+    var cardH = cardW / 1.6;
+    var gap = cardW * (50 / 502);
+    var radius = cardW * (16 / 502);
+    layout = { w: w, h: h, dpr: dpr, cardW: cardW, cardH: cardH, gap: gap, radius: radius };
+    return layout;
   }
 
-  function stepBy(dir) {
-    if (dragging) endDrag(true);
-    var next = clamp(target + dir, 0, count - 1);
-    if (next === target) {
-      if (reduced) return;
-      if ((target === 0 && dir < 0) || (target === count - 1 && dir > 0)) {
-        velocity += dir * 2.4;
-        position += dir * 0.02;
-      }
-      return;
-    }
-    target = next;
-    if (reduced) {
-      position = target;
-      velocity = 0;
-    } else {
-      velocity = clamp(velocity + dir * 1.55, -3.2, 3.2);
-    }
+  function cardCenterY(index, scrollPos) {
+    // Active card (scrollPos) sits so its rect bottom is near the floor merge zone.
+    // From 1280x720 ref: active top ~338, cardH~315 → center ~495.5 ≈ 0.688 * H
+    var L = layout;
+    var activeCenter = L.h * 0.688;
+    var stride = L.cardH + L.gap;
+    return activeCenter + (index - scrollPos) * stride;
   }
 
-  function endDrag(cancel) {
-    dragging = false;
-    if (pointerId !== null && stack.hasPointerCapture && stack.hasPointerCapture(pointerId)) {
-      try { stack.releasePointerCapture(pointerId); } catch (err) { /* already released */ }
-    }
-    pointerId = null;
-    if (cancel) return;
-    if (reduced) {
-      target = clamp(Math.round(position), 0, count - 1);
-      position = target;
-      velocity = 0;
-      return;
-    }
-    var dest = Math.round(position);
-    if (velocity > 1.25) dest = Math.ceil(position - 1e-4);
-    else if (velocity < -1.25) dest = Math.floor(position + 1e-4);
-    target = clamp(dest, 0, count - 1);
-    velocity = clamp(velocity, -2.7, 2.7);
-  }
+  function updateDomCards() {
+    var L = layout;
+    var nodes = cardsDom.children;
+    for (var i = 0; i < N; i++) {
+      var el = nodes[i];
+      var cy = cardCenterY(i, scroll);
+      var top = cy - L.cardH * 0.5;
+      var left = (L.w - L.cardW) * 0.5;
+      el.style.width = L.cardW + "px";
+      el.style.height = L.cardH + "px";
+      el.style.transform = "translate(" + left + "px," + top + "px)";
+      el.style.borderRadius = L.radius + "px";
 
-  function onPointerDown(event) {
-    if (event.button !== undefined && event.button !== 0) return;
-    dragging = true;
-    pointerId = event.pointerId;
-    dragY = event.clientY;
-    dragT = performance.now();
-    velocity = 0;
-    try { stack.setPointerCapture(event.pointerId); } catch (err) { /* pointer already gone */ }
-  }
+      var dist = Math.abs(i - scroll);
+      var below = i > scroll + 0.55;
+      var visible = !below && dist < 2.2;
+      el.style.opacity = visible ? "1" : "0";
+      el.style.visibility = visible ? "visible" : "hidden";
 
-  function onPointerMove(event) {
-    if (!dragging || event.pointerId !== pointerId) return;
-    var now = performance.now();
-    var dt = Math.max(0.008, (now - dragT) / 1000);
-    var dy = event.clientY - dragY;
-    var delta = -dy / PIXELS;
-    var max = count - 1;
-    if ((position <= 0 && delta < 0) || (position >= max && delta > 0)) delta *= 0.28;
-    position = clamp(position + delta, -0.28, max + 0.28);
-    velocity = delta / dt;
-    dragY = event.clientY;
-    dragT = now;
-  }
-
-  function onPointerUp(event) {
-    if (!dragging || event.pointerId !== pointerId) return;
-    endDrag(false);
-  }
-
-  function onWheel(event) {
-    if (event.ctrlKey) return;
-    var bounds = stack.getBoundingClientRect();
-    var inside = event.clientX >= bounds.left - 24 && event.clientX <= bounds.right + 24 &&
-      event.clientY >= bounds.top - 40 && event.clientY <= bounds.bottom + 80;
-    var stage = document.querySelector(".stage").getBoundingClientRect();
-    var inColumn = event.clientX >= stage.left && event.clientX <= stage.right;
-    if (!inside && !inColumn) return;
-    event.preventDefault();
-    var now = performance.now();
-    if (now - wheelStamp < 520) {
-      wheelStamp = now;
-      return;
-    }
-    var scale = event.deltaMode === 1 ? 18 : event.deltaMode === 2 ? 400 : 1;
-    wheelAcc += event.deltaY * scale;
-    if (Math.abs(wheelAcc) < 24) return;
-    var dir = Math.sign(wheelAcc);
-    wheelAcc = 0;
-    wheelStamp = now;
-    stepBy(dir);
-  }
-
-  function onKey(event) {
-    if (event.altKey || event.metaKey || event.ctrlKey) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "PageDown") {
-      event.preventDefault();
-      stepBy(1);
-    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft" || event.key === "PageUp") {
-      event.preventDefault();
-      stepBy(-1);
+      var veil = el.querySelector(".veil");
+      var merge = Math.max(0, 1 - Math.abs(i - scroll));
+      veil.style.opacity = String(Math.pow(merge, 1.35) * 0.7);
     }
   }
 
-  function integrate(dt) {
-    if (reduced) {
-      if (!dragging) {
-        position = target;
-        velocity = 0;
-      }
-      displayVel = 0;
-      return;
-    }
-    if (!dragging) {
-      var steps = 2;
-      var h = dt / steps;
-      for (var s = 0; s < steps; s++) {
-        var acc = -SPRING_K * (position - target) - SPRING_C * velocity;
-        velocity += acc * h;
-        position += velocity * h;
-      }
-      if (Math.abs(position - target) < 0.0007 && Math.abs(velocity) < 0.02) {
-        position = target;
-        velocity = 0;
-      }
-    }
-    displayVel += (velocity - displayVel) * Math.min(1, dt * 16);
-    if (!reduced) beamTime += dt;
-  }
+  /* -------------------- WebGL -------------------- */
+  var VS =
+    "attribute vec2 a;\nvoid main(){gl_Position=vec4(a,0.0,1.0);}";
 
-  function frame(now) {
-    if (!running) return;
-    var dt = last ? Math.min(0.032, (now - last) / 1000) : 0.016;
-    last = now;
-    integrate(dt);
-    var overshoot = dragging || reduced ? 0 : position - target;
-    layout(overshoot);
-    requestAnimationFrame(frame);
-  }
+  var FS = [
+    "#extension GL_OES_standard_derivatives : enable",
+    "precision highp float;",
+    "uniform vec2 uRes;",
+    "uniform float uScroll;",
+    "uniform vec2 uCard;", // half size
+    "uniform float uGap;",
+    "uniform float uRad;",
+    "uniform float uTheme;", // 0 dark 1 light
+    "uniform float uMaterial;", // 0 glass 1 metal
+    "uniform vec3 uEdge[6];",
+    "uniform vec3 uBand[6];",
+    "uniform vec3 uCore[6];",
+    "uniform vec3 uTint[6];",
 
-  stack.addEventListener("pointerdown", onPointerDown);
-  stack.addEventListener("pointermove", onPointerMove);
-  stack.addEventListener("pointerup", onPointerUp);
-  stack.addEventListener("pointercancel", onPointerUp);
-  window.addEventListener("wheel", onWheel, { passive: false });
-  window.addEventListener("keydown", onKey);
-  prevBtn.addEventListener("click", function () { stepBy(-1); });
-  nextBtn.addEventListener("click", function () { stepBy(1); });
-  Array.prototype.forEach.call(document.querySelectorAll("[data-set-theme]"), function (btn) {
-    btn.addEventListener("click", function () { setTheme(btn.getAttribute("data-set-theme")); });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll("[data-set-material]"), function (btn) {
-    btn.addEventListener("click", function () { setMaterial(btn.getAttribute("data-set-material")); });
-  });
-  if (motionQuery.addEventListener) {
-    motionQuery.addEventListener("change", function () {
-      reduced = motionQuery.matches;
-      if (reduced) {
-        position = target;
-        velocity = 0;
-        displayVel = 0;
-      }
-    });
-  }
-  document.addEventListener("visibilitychange", function () {
-    if (document.hidden) {
-      running = false;
-    } else if (!running) {
-      running = true;
-      last = performance.now();
-      requestAnimationFrame(frame);
-    }
-  });
+    "float sdRoundBox(vec2 p, vec2 b, float r){",
+    "  vec2 q = abs(p) - b + r;",
+    "  return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r;",
+    "}",
 
-  syncToggles();
-  stack.classList.add("is-ready");
-  last = performance.now();
-  requestAnimationFrame(frame);
+    "float smin(float a, float b, float k){",
+    "  if(k<=0.0001) return min(a,b);",
+    "  float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);",
+    "  return mix(b, a, h) - k*h*(1.0-h);",
+    "}",
 
-  function initGL(surface) {
-    var gl = surface.getContext("webgl", {
-      alpha: true,
-      premultipliedAlpha: false,
-      antialias: false,
-      depth: false,
-      stencil: false,
-      preserveDrawingBuffer: true,
-      powerPreference: "low-power"
-    });
-    if (!gl) return null;
-    var vsSource = "attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }";
-    var fsSource = [
-      "precision mediump float;",
-      "uniform vec2 uRes;",
-      "uniform float uTime;",
-      "uniform float uVel;",
-      "uniform vec3 uColor;",
-      "uniform float uReduced;",
-      "uniform float uDark;",
-      "void main() {",
-      "  vec2 uv = gl_FragCoord.xy / uRes;",
-      "  float fromEdge = 1.0 - uv.y;",
-      "  float speed = min(abs(uVel), 6.0);",
-      "  float amp = uReduced > 0.5 ? 0.0 : min(speed * 0.02, 0.15);",
-      "  float phase = uTime * 5.2;",
-      "  float wave = sin(fromEdge * 9.0 + phase) * amp * fromEdge;",
-      "  wave += sin(fromEdge * 16.0 - phase * 1.35) * amp * 0.45 * fromEdge;",
-      "  float shear = uReduced > 0.5 ? 0.0 : clamp(uVel, -6.0, 6.0) * 0.014 * fromEdge;",
-      "  float x = uv.x - 0.5 - wave - shear;",
-      "  float stretch = uReduced > 0.5 ? 0.9 : 0.86 + speed * 0.13;",
-      "  float along = fromEdge / stretch;",
-      "  float fade = exp(-along * along * 1.65);",
-      "  fade *= smoothstep(1.28, 0.12, along);",
-      "  float width = mix(0.2, 0.028, clamp(along, 0.0, 1.0));",
-      "  float d = abs(x);",
-      "  float glow = exp(-(d * d) / (width * width));",
-      "  float core = exp(-(d * d) / (width * width * 0.16));",
-      "  float bloom = exp(-(d * d) / (width * width * 4.6));",
-      "  float lip = smoothstep(0.1, 0.0, fromEdge) * exp(-(d * d) / 0.012);",
-      "  float alpha = (glow * 0.58 + core * 0.9 + bloom * 0.2 + lip * 0.45) * fade;",
-      "  vec3 lit = mix(uColor, vec3(1.0), core * 0.5);",
-      "  vec3 ink = uColor * (0.82 + core * 0.18);",
-      "  vec3 col = uDark > 0.5 ? lit : ink;",
-      "  float gain = uDark > 0.5 ? 1.0 : 1.12;",
-      "  alpha *= gain;",
-      "  if (alpha < 0.004) discard;",
-      "  gl_FragColor = vec4(col, alpha);",
-      "}"
-    ].join("\n");
+    "float smax(float a, float b, float k){",
+    "  return -smin(-a, -b, k);",
+    "}",
 
-    function compile(type, source) {
-      var shader = gl.createShader(type);
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error(gl.getShaderInfoLog(shader));
-        gl.deleteShader(shader);
-        return null;
-      }
-      return shader;
-    }
+    // screen-space main
+    "void main(){",
+    "  vec2 frag = gl_FragCoord.xy;",
+    "  vec2 uv = vec2(frag.x, uRes.y - frag.y);",
+    "  vec3 bg = mix(vec3(0.0), vec3(0.957), uTheme);",
+    "  vec3 col = bg;",
 
-    var vs = compile(gl.VERTEX_SHADER, vsSource);
-    var fs = compile(gl.FRAGMENT_SHADER, fsSource);
-    if (!vs || !fs) return null;
-    var program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.bindAttribLocation(program, 0, "aPos");
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error(gl.getProgramInfoLog(program));
+    "  float stride = uCard.y*2.0 + uGap;",
+    "  float activeCY = uRes.y * 0.688;",
+    "  float hx = uCard.x;",
+    "  float hy = uCard.y;",
+
+    "  for(int i=0;i<6;i++){",
+    "    float fi = float(i);",
+    "    if(fi > uScroll + 0.55) continue;",
+
+    "    float cy = activeCY + (fi - uScroll) * stride;",
+    "    vec2 p = uv - vec2(uRes.x*0.5, cy);",
+
+    "    float prox = clamp(1.0 - abs(fi - uScroll), 0.0, 1.0);",
+    "    float cardBottom = cy + hy;",
+    "    float distToFloor = uRes.y - cardBottom;",
+    "    float near = smoothstep(hy * 2.0, -hy * 0.4, distToFloor);",
+
+    "    // Polynomial flare matched to reference trumpet + SDF smooth-union with floor",
+    "    // Flare starts just above card mid; expand capped to ~ref trumpet",
+    "    float y0 = cy - hy * 0.08;",
+    "    float tDown = clamp((uv.y - y0) / max(uRes.y - y0, 1.0), 0.0, 1.0);",
+    "    float flareT = smoothstep(0.0, 1.0, tDown);",
+    "    float maxExp = hx * 0.92;",
+    "    float expand = (1.2 * flareT - 0.4 * flareT * flareT) * maxExp * prox * near;",
+    "    // Extend box toward floor so active card merges continuously",
+    "    float hyExt = mix(hy, (uRes.y - cy) * 0.98, prox * near);",
+    "    float dBox = sdRoundBox(p, vec2(hx + max(expand, 0.0), hyExt), uRad);",
+
+    "    float k = mix(0.0, uRes.y * 0.28, prox * prox) * mix(0.2, 1.0, near);",
+    "    float dFloor = uRes.y - uv.y;",
+    "    float d = dBox;",
+    "    if(k > 0.5) d = smin(dBox, dFloor, k);",
+
+    "    if(d > 6.0) continue;",
+
+    "    vec3 edgeCol = uEdge[i];",
+    "    vec3 bandCol = uBand[i];",
+    "    vec3 coreCol = uCore[i];",
+    "    vec3 tint = uTint[i];",
+
+    "    float aa = 1.15;",
+    "    float cover = 1.0 - smoothstep(-aa, aa, d);",
+    "    float border = smoothstep(1.15 + aa, 1.15 - aa, abs(d));",
+
+    "    float sheen = 0.0;",
+    "    if(uMaterial < 0.5){",
+    "      float diag = (p.x * 0.3 + p.y * 0.55) / max(hx, 1.0);",
+    "      sheen = smoothstep(-0.4, 0.5, diag) * smoothstep(1.3, 0.2, diag) * 0.09;",
+    "    } else {",
+    "      sheen = 0.03 + 0.03 * sin(p.y * 0.42);",
+    "    }",
+
+    "    vec3 baseFill;",
+    "    if(uTheme < 0.5){",
+    "      baseFill = (uMaterial < 0.5) ? (tint + vec3(0.012) + sheen) : (mix(vec3(0.05), tint*2.0, 0.55) + sheen);",
+    "    } else {",
+    "      baseFill = mix(vec3(0.94), tint*2.0 + vec3(0.85), 0.2) + sheen*0.4;",
+    "    }",
+
+    "    vec3 fill = baseFill;",
+    "    if(prox > 0.02 && cover > 0.01){",
+    "      float nx = clamp(p.x / (hx + expand * 0.35 + 0.001), -1.0, 1.0);",
+    "      // Smile: low at center, high at sides — soft front",
+    "      float arcY = mix(hy * 0.18, -hy * 0.52, pow(abs(nx), 1.65));",
+    "      float below = uv.y - (cy + arcY);",
+    "      float front = smoothstep(-10.0, 42.0, below);",
+
+    "      vec2 origin = vec2(uRes.x * 0.5, uRes.y + hy * 0.2);",
+    "      float rx = (uv.x - origin.x) / (hx * 2.55);",
+    "      float ry = (uv.y - origin.y) / (hy * 3.4);",
+    "      float cone = exp(-dot(vec2(rx,ry), vec2(rx,ry)) * 1.05);",
+
+    "      float fromBottom = clamp((uRes.y - uv.y) / (uRes.y * 0.55), 0.0, 2.5);",
+    "      // Peak white ~mid-lower, mint at very bottom (matches ref)",
+    "      float corePeak = exp(-pow((fromBottom - 0.22) / 0.28, 2.0));",
+    "      float coreAmt = corePeak * cone;",
+    "      float midAmt = exp(-fromBottom * fromBottom * 1.85) * cone;",
+    "      float bandLine = exp(-pow((below - 8.0) / 32.0, 2.0)) * cone;",
+
+    "      float lit = clamp(midAmt * front * 1.25, 0.0, 1.0) * prox;",
+    "      vec3 glow = mix(bandCol * 3.2, edgeCol * 3.4, 0.55);",
+    "      glow = mix(glow, coreCol, clamp(coreAmt * 1.05, 0.0, 1.0));",
+    "      // Saturated ribbon along smile",
+    "      glow = mix(glow, edgeCol * 3.4 + bandCol * 0.5, clamp(bandLine * front * 1.55, 0.0, 1.0));",
+    "      glow = mix(glow, mix(coreCol, edgeCol, 0.35), smoothstep(0.18, 0.0, fromBottom) * 0.6);",
+
+    "      fill = mix(baseFill, glow, lit);",
+    "      fill += coreCol * coreAmt * 0.28 * prox;",
+
+    "      float corner = smoothstep(0.5, 1.4, abs(rx)) * (1.0 - smoothstep(0.0, 0.45, fromBottom));",
+    "      fill = mix(fill, bg * 0.1 + bandCol * 0.08, corner * lit * 0.7);",
+    "    }",
+
+    "    // Chromatic fringe — only on flare lips",
+    "    float flareZone = 0.0;",
+    "    if(prox > 0.05){",
+    "      flareZone = smoothstep(0.0, hy * 0.35, p.y) * prox;",
+    "      flareZone *= smoothstep(hx * 0.85, hx * 1.05 + expand, abs(p.x));",
+    "    }",
+    "    float edgeProx = 1.0 - smoothstep(0.0, 3.2, abs(d));",
+    "    float outerF = smoothstep(-0.2, 2.5, d) * edgeProx;",
+    "    float innerF = smoothstep(1.8, -2.0, d) * edgeProx;",
+    "    vec3 chroma = vec3(1.0, 0.32, 0.68) * outerF * flareZone * 1.15;",
+    "    chroma += vec3(0.2, 0.95, 1.0) * innerF * flareZone * 1.05;",
+
+    "    vec3 edgeMix = mix(edgeCol * 1.3, mix(edgeCol, vec3(0.4), 0.35), uTheme);",
+    "    vec3 pix = mix(fill, edgeMix, border * 0.92);",
+    "    pix += chroma;",
+
+    "    col = mix(col, pix, max(cover, border));",
+    "  }",
+
+    "  gl_FragColor = vec4(col, 1.0);",
+    "}",
+  ].join("\n");
+
+  function compile(gl, type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s));
+      gl.deleteShader(s);
       return null;
     }
-    gl.useProgram(program);
-    var buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    return {
-      gl: gl,
-      program: program,
-      buffer: buffer,
-      uRes: gl.getUniformLocation(program, "uRes"),
-      uTime: gl.getUniformLocation(program, "uTime"),
-      uVel: gl.getUniformLocation(program, "uVel"),
-      uColor: gl.getUniformLocation(program, "uColor"),
-      uReduced: gl.getUniformLocation(program, "uReduced"),
-      uDark: gl.getUniformLocation(program, "uDark")
-    };
+    return s;
   }
 
-  function drawGL(state, w, h, color, vel, time, isReduced, isDark) {
-    var gl = state.gl;
-    if (gl.canvas.width !== w || gl.canvas.height !== h) {
-      gl.canvas.width = w;
-      gl.canvas.height = h;
-      gl.viewport(0, 0, w, h);
-      gl.useProgram(state.program);
-      gl.bindBuffer(gl.ARRAY_BUFFER, state.buffer);
-      gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  function initGL() {
+    var gl = canvas.getContext("webgl", {
+      alpha: false,
+      antialias: true,
+      premultipliedAlpha: false,
+      powerPreference: "high-performance",
+    });
+    if (!gl) return null;
+    gl.getExtension("OES_standard_derivatives");
+    var vs = compile(gl, gl.VERTEX_SHADER, VS);
+    var fs = compile(gl, gl.FRAGMENT_SHADER, FS);
+    if (!vs || !fs) return null;
+    var prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.bindAttribLocation(prog, 0, "a");
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(prog));
+      return null;
     }
-    gl.viewport(0, 0, w, h);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.uniform2f(state.uRes, w, h);
-    gl.uniform1f(state.uTime, time);
-    gl.uniform1f(state.uVel, vel);
-    gl.uniform3f(state.uColor, color[0], color[1], color[2]);
-    gl.uniform1f(state.uReduced, isReduced ? 1 : 0);
-    gl.uniform1f(state.uDark, isDark ? 1 : 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    var buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+    var loc = {};
+    [
+      "uRes",
+      "uScroll",
+      "uCard",
+      "uGap",
+      "uRad",
+      "uTheme",
+      "uMaterial",
+      "uEdge",
+      "uBand",
+      "uCore",
+      "uTint",
+    ].forEach(function (name) {
+      loc[name] = gl.getUniformLocation(prog, name);
+    });
+
+    return { gl: gl, prog: prog, loc: loc };
+  }
+
+  var glState = initGL();
+
+  function setColorArray(gl, loc, key) {
+    // WebGL1: set each uEdge[i] individually
+    for (var i = 0; i < N; i++) {
+      var locI = gl.getUniformLocation(glState.prog, key + "[" + i + "]");
+      var c = CARDS[i][key === "uEdge" ? "edge" : key === "uBand" ? "band" : key === "uCore" ? "core" : "tint"];
+      gl.uniform3fv(locI, c);
+    }
+  }
+
+  function resize() {
+    computeLayout();
+    var L = layout;
+    canvas.width = Math.round(L.w * L.dpr);
+    canvas.height = Math.round(L.h * L.dpr);
+    canvas.style.width = L.w + "px";
+    canvas.style.height = L.h + "px";
+    if (glState) {
+      glState.gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+    updateDomCards();
+  }
+
+  function render() {
+    if (!glState) return;
+    var gl = glState.gl;
+    var L = layout;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(glState.prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.getParameter(gl.ARRAY_BUFFER_BINDING));
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Draw in CSS pixel space: pass resolution in CSS pixels, but frag coords are in device pixels.
+    // Scale: gl_FragCoord is in device pixels, so uRes should be device size and we use that consistently.
+    var w = canvas.width;
+    var h = canvas.height;
+    var scale = L.dpr;
+    gl.uniform2f(glState.loc.uRes, w, h);
+    gl.uniform1f(glState.loc.uScroll, scroll);
+    gl.uniform2f(glState.loc.uCard, (L.cardW * 0.5) * scale, (L.cardH * 0.5) * scale);
+    gl.uniform1f(glState.loc.uGap, L.gap * scale);
+    gl.uniform1f(glState.loc.uRad, L.radius * scale);
+    gl.uniform1f(glState.loc.uTheme, root.dataset.theme === "light" ? 1 : 0);
+    gl.uniform1f(glState.loc.uMaterial, root.dataset.material === "metal" ? 1 : 0);
+    setColorArray(gl, glState.loc, "uEdge");
+    setColorArray(gl, glState.loc, "uBand");
+    setColorArray(gl, glState.loc, "uCore");
+    setColorArray(gl, glState.loc, "uTint");
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  /* -------------------- Animation / input -------------------- */
+  function goTo(i) {
+    target = Math.max(0, Math.min(N - 1, i));
+    if (reduced) {
+      scroll = target;
+      vel = 0;
+      syncChrome();
+      updateDomCards();
+    }
+  }
+
+  function onWheel(e) {
+    e.preventDefault();
+    var now = performance.now();
+    if (now < wheelLock) return;
+    var dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16;
+    if (e.deltaMode === 2) dy *= layout.h;
+    if (Math.abs(dy) < 1) return;
+    wheelLock = now + 420;
+    goTo(target + (dy > 0 ? 1 : -1));
+  }
+
+  function onKey(e) {
+    if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === "j") {
+      e.preventDefault();
+      goTo(target + 1);
+    } else if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "k") {
+      e.preventDefault();
+      goTo(target - 1);
+    } else if (e.key === "Home") {
+      goTo(0);
+    } else if (e.key === "End") {
+      goTo(N - 1);
+    }
+  }
+
+  function onPointerDown(e) {
+    if (e.target.closest && e.target.closest(".panel")) return;
+    dragging = true;
+    pointerId = e.pointerId;
+    dragStartY = e.clientY;
+    dragStartScroll = scroll;
+    vel = 0;
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch (err) {}
+  }
+
+  function onPointerMove(e) {
+    if (!dragging || e.pointerId !== pointerId) return;
+    var dy = e.clientY - dragStartY;
+    var stride = layout.cardH + layout.gap;
+    scroll = dragStartScroll - dy / stride;
+    scroll = Math.max(-0.12, Math.min(N - 1 + 0.12, scroll));
+    updateDomCards();
+  }
+
+  function onPointerUp(e) {
+    if (!dragging || e.pointerId !== pointerId) return;
+    dragging = false;
+    pointerId = null;
+    var nearest = Math.round(scroll);
+    goTo(nearest);
+  }
+
+  function tick(ts) {
+    if (!lastTs) lastTs = ts;
+    var dt = Math.min(0.05, (ts - lastTs) / 1000);
+    lastTs = ts;
+
+    if (!dragging && !reduced) {
+      // Critically-ish damped spring, no overshoot: use exponential ease toward target
+      var diff = target - scroll;
+      // Smooth ease: critically damped approx
+      var omega = 11.5;
+      var accel = omega * omega * diff - 2 * omega * vel;
+      vel += accel * dt;
+      scroll += vel * dt;
+      if (Math.abs(diff) < 0.0004 && Math.abs(vel) < 0.0004) {
+        scroll = target;
+        vel = 0;
+      }
+    } else if (reduced) {
+      scroll = target;
+      vel = 0;
+    }
+
+    syncChrome();
+    updateDomCards();
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  /* -------------------- Wire up -------------------- */
+  buildDom();
+  syncToggles();
+
+  document.querySelectorAll("[data-theme]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      root.dataset.theme = btn.getAttribute("data-theme");
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", root.dataset.theme === "light" ? "#f4f4f5" : "#000000");
+      syncToggles();
+    });
+  });
+  document.querySelectorAll("[data-material]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      root.dataset.material = btn.getAttribute("data-material");
+      syncToggles();
+    });
+  });
+
+  window.addEventListener("resize", resize);
+  window.addEventListener("keydown", onKey);
+  window.addEventListener("wheel", onWheel, { passive: false });
+
+  var app = document.getElementById("app");
+  app.addEventListener("pointerdown", onPointerDown);
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("pointercancel", onPointerUp);
+
+  window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", function (e) {
+    reduced = e.matches;
+    if (reduced) {
+      scroll = target;
+      vel = 0;
+    }
+  });
+
+  resize();
+
+  // Test / debug helpers
+  window.__elastic = {
+    goTo: goTo,
+    get scroll() { return scroll; },
+    get target() { return target; },
+    setScroll: function (v) { scroll = v; target = Math.round(v); vel = 0; syncChrome(); updateDomCards(); },
+    build: BUILD,
+    hasGL: !!glState,
+  };
+
+  if (!glState) {
+    fallback.hidden = false;
+    canvas.style.display = "none";
+  } else {
+    // Expose build marker for publish verification
+    document.documentElement.dataset.build = BUILD;
+    requestAnimationFrame(tick);
   }
 })();
